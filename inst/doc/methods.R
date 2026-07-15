@@ -35,6 +35,21 @@ meta_b0 <- coef(fit_det, which = "meta")[1]
 group_b0 <- sapply(coef(fit_det, which = "group"), `[`, 1)
 meta_b0 >= group_b0
 
+## ----det-qp-------------------------------------------------------------------
+fit_qp <- metafrontier(
+  log_y ~ log_x1 + log_x2,
+  data = sim$data,
+  group = "group",
+  meta_type = "deterministic",
+  objective = "qp"
+)
+
+# LP and QP criteria typically give very similar coefficients
+cbind(
+  LP = coef(fit_det, which = "meta"),
+  QP = coef(fit_qp, which = "meta")
+)
+
 ## ----sto-example--------------------------------------------------------------
 fit_sto <- metafrontier(
   log_y ~ log_x1 + log_x2,

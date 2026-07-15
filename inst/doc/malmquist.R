@@ -35,6 +35,7 @@ malm <- malmquist_meta(
   data = panel_data,
   group = "group",
   time = "time",
+  id = "id",
   orientation = "output",
   rts = "crs"
 )
@@ -74,6 +75,7 @@ malm_vrs <- malmquist_meta(
   data = panel_data,
   group = "group",
   time = "time",
+  id = "id",
   rts = "vrs"
 )
 
@@ -94,6 +96,7 @@ data.frame(
 #   data = Produc,
 #   group = "region",
 #   time = "year",
+#   id = "state",
 #   rts = "crs"
 # )
 # summary(malm_us)
@@ -107,6 +110,7 @@ data.frame(
 #   data = utility,
 #   group = "regu",
 #   time = "year",
+#   id = "firm",
 #   rts = "vrs"
 # )
 # summary(malm_util)

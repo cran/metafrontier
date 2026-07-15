@@ -76,6 +76,10 @@ te_star <- efficiencies(fit_det, type = "meta")
 # Verify the fundamental identity: TE* = TE x TGR
 all.equal(te_star, te * tgr)
 
+## ----efficiencies-jlms--------------------------------------------------------
+te_jlms <- efficiencies(fit_det, type = "group", estimator = "jlms")
+cor(te, te_jlms)
+
 ## ----tgr----------------------------------------------------------------------
 tgr_by_group <- technology_gap_ratio(fit_det)
 lapply(tgr_by_group, summary)
@@ -111,6 +115,9 @@ plot(fit_det, which = "decomposition")
 
 ## ----poolability--------------------------------------------------------------
 poolability_test(fit_det)
+
+## ----convergence--------------------------------------------------------------
+check_convergence(fit_det)
 
 ## ----distributions, eval=FALSE------------------------------------------------
 # # Half-normal (default): u ~ |N(0, sigma_u^2)|
