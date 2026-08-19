@@ -1,11 +1,11 @@
-fff52032fbd4d8c34d4e4b50fcc57482 *DESCRIPTION
+1edef9fc0ab9213a7c177d2858165f5d *DESCRIPTION
 c387b15313d6537d5a652e5291967e7b *NAMESPACE
-789da85549eb045a3988695b32fcf0b7 *NEWS.md
+fd4da39042b07abbdc1eecf4a55418f3 *NEWS.md
 b91b14f12b78ff09928a217d3fd7e2c0 *R/bootstrap.R
 624cbcb798d27a491edb1b467bd0836c *R/diagnostics.R
 0d8cc236dc6a3b7e4cf4b5144db3f44b *R/efficiencies.R
 93bbf06e3b9c78199b9530d6aadb67d1 *R/ggplot.R
-0417ef62e015f9538c4a9d064eff9d6c *R/hypothesis_tests.R
+c5e994ddff249f631d70603215f37a1b *R/hypothesis_tests.R
 1443da866f7c1219b88df647f05b592a *R/latent_class.R
 bd7f0e1e64bacc9b74f066917575c741 *R/malmquist.R
 e94695fa6c56f7cace0ad365fb74de89 *R/metafrontier-package.R
@@ -15,8 +15,8 @@ a6f67be55cdb4408a4b1ba2c19ee2ac8 *R/metafrontier_dea.R
 a7d0b7e99f1150c4017ba0abdc8bc52b *R/methods.R
 eda4355a2aa24deb5f4dddfc75f4128c *R/model_extractors.R
 cea49121b15545fdfcb2d0b7fc4a67b0 *R/plot.R
-789d97b9e8910aa00bdb66a1ffeb244b *R/sfa_estimation.R
-ac0be4ded45b2f0bbda868803510295f *R/sfa_panel.R
+6c942b7e083097323a634bc4459ad248 *R/sfa_estimation.R
+aec7c5e7a81ea2c6e0f7bdd933963de1 *R/sfa_panel.R
 b8dcca85e3e966f30218519a57cd98e5 *R/simulate.R
 933aa4c11151789840721e35f0fd9578 *R/tgr.R
 69e522d6ecc5f096d5e4868c5de09e24 *R/zzz.R
@@ -47,7 +47,7 @@ d2f39736583e4a9cf8343ae03ae1dda6 *man/efficiencies.Rd
 66b9ad476548e459d23dc046866a768a *man/metafrontier-package.Rd
 d1392bd184fa6ff43bd202cdde227724 *man/metafrontier.Rd
 142e04860bd5953b85ef93695b1448a1 *man/plot.metafrontier.Rd
-e65560ce80f511709134ff618b9c49f8 *man/poolability_test.Rd
+ef0a8b8ba3f2ddb69a8539c433b1924b *man/poolability_test.Rd
 fa7e0d4bb95fd7e3e8492c10ee931d19 *man/predict.metafrontier.Rd
 b3ae0a34bd1baa4617d9e7bc5bdd917b *man/print.metafrontier.Rd
 06d36799fc73061cc548a6f9823cebdf *man/select_n_classes.Rd
