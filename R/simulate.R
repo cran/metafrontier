@@ -45,6 +45,26 @@
 #'   log-inputs are drawn from a multivariate normal distribution with
 #'   this correlation structure; see Details. Default \code{NULL}
 #'   (independent inputs).
+#' @param frontier character. \code{"production"} (default) or
+#'   \code{"cost"}. For a cost frontier the column \code{log_y} holds
+#'   log cost, generated as \eqn{x_i^\top \beta_g + v_i + u_i}; group
+#'   cost frontiers lie on or above the metafrontier (the intercept is
+#'   raised by \code{tech_gap}), and \code{true_tgr} is the ratio of
+#'   minimum costs, \code{exp(-tech_gap[g])} in the default design.
+#' @param selection optional list \code{list(gamma = c(g0, g1), rho = )}
+#'   for a Greene (2010) sample-selection design: a selection regressor
+#'   \code{z1 ~ N(0, 1)} and indicator \code{d = 1(g0 + g1 z1 + w > 0)},
+#'   with \code{corr(w, v) = rho}; \code{log_y} is \code{NA} when
+#'   \code{d = 0}. Default \code{NULL} (no selection).
+#' @param spatial optional list \code{list(rho = , k = 5)} for a
+#'   spatial-autoregressive design: units get random coordinates in the
+#'   unit square, \code{W} is the row-standardised k-nearest-neighbour
+#'   matrix within each group, and \eqn{\log y = (I - \rho W_g)^{-1}
+#'   (x'\beta_g + v \mp u)}. The block-diagonal n x n matrix is returned
+#'   as \code{W}, and \code{true_tgr} is the gap between the long-run
+#'   frontiers \eqn{x'\beta_g / (1 - \rho)}: \code{exp(-tech_gap[g] /
+#'   (1 - rho))} in the default design. Default \code{NULL} (no spatial
+#'   dependence).
 #'
 #' @details
 #' By default the group frontiers share the metafrontier slopes and
@@ -107,8 +127,13 @@ simulate_metafrontier <- function(n_groups = 2L,
                                   seed = NULL,
                                   beta_groups = NULL,
                                   input_means = NULL,
-                                  input_corr = NULL) {
+                                  input_corr = NULL,
+                                  frontier = c("production", "cost"),
+                                  selection = NULL,
+                                  spatial = NULL) {
 
+  frontier <- match.arg(frontier)
+  sign <- if (frontier == "cost") -1 else 1
   if (!is.null(seed)) set.seed(seed)
 
   custom_betas <- !is.null(beta_groups)
@@ -211,6 +236,8 @@ simulate_metafrontier <- function(n_groups = 2L,
   frames <- vector("list", n_groups)
   group_names <- paste0("G", seq_len(n_groups))
 
+  W_list <- vector("list", n_groups)
+
   # Group-specific betas: shift intercept by tech_gap (unless supplied)
   if (!custom_betas) {
     beta_groups <- vector("list", n_groups)
@@ -243,30 +270,57 @@ simulate_metafrontier <- function(n_groups = 2L,
                    nrow = n_g)
       frontier_y <- XB[, g]
     } else {
-      # Group-specific frontier = metafrontier - tech_gap (intercept only)
+      # Group-specific frontier = metafrontier -/+ tech_gap (intercept
+      # only): below the production metafrontier, above the cost one
       beta_g <- beta_meta
-      beta_g[1] <- beta_meta[1] - tech_gap[g]
+      beta_g[1] <- beta_meta[1] - sign * tech_gap[g]
       beta_groups[[g]] <- beta_g
 
       # Frontier output
       frontier_y <- X %*% beta_g
     }
 
-    # Noise and inefficiency
-    v <- stats::rnorm(n_g, 0, sigma_v)
+    # Noise and inefficiency; under selection the noise is correlated
+    # with the selection error w
+    if (is.null(selection)) {
+      v <- stats::rnorm(n_g, 0, sigma_v)
+    } else {
+      z1 <- stats::rnorm(n_g)
+      w <- stats::rnorm(n_g)
+      rho <- selection$rho
+      v <- sigma_v * (rho * w + sqrt(1 - rho^2) * stats::rnorm(n_g))
+      d <- as.numeric(selection$gamma[1] + selection$gamma[2] * z1 + w > 0)
+    }
     u <- abs(stats::rnorm(n_g, 0, sigma_u[g]))
 
-    # Observed output
-    log_y <- as.numeric(frontier_y + v - u)
+    # Observed output (or cost: inefficiency raises it)
+    log_y <- as.numeric(frontier_y + v - sign * u)
+    if (!is.null(spatial)) {
+      # SAR outcome with row-standardised kNN weights within the group
+      k_nn <- if (is.null(spatial$k)) 5L else spatial$k
+      coords <- matrix(stats::runif(2 * n_g), n_g, 2)
+      dmat <- as.matrix(stats::dist(coords))
+      W_list[[g]] <- t(apply(dmat, 1, function(r) {
+        w <- numeric(n_g)
+        w[order(r)[1L + seq_len(k_nn)]] <- 1 / k_nn
+        w
+      }))
+      log_y <- as.numeric(solve(diag(n_g) - spatial$rho * W_list[[g]],
+                                log_y))
+    }
 
     # True values
     true_te <- exp(-u)
     if (custom_betas) {
-      # TGR against the pointwise maximum over group frontiers, in (0, 1]
-      true_tgr <- exp(frontier_y - apply(XB, 1, max))
+      # TGR against the pointwise maximum (cost: minimum) over group
+      # frontiers, in (0, 1]
+      envelope <- sign * apply(sign * XB, 1, max)
+      true_tgr <- exp(sign * (frontier_y - envelope))
     } else {
       true_tgr <- exp(-tech_gap[g])  # constant for intercept-shift DGP
     }
+    # Spatial: gap between long-run frontiers x'beta / (1 - rho)
+    if (!is.null(spatial)) true_tgr <- true_tgr^(1 / (1 - spatial$rho))
 
     df_g <- data.frame(
       X_inputs,
@@ -279,6 +333,11 @@ simulate_metafrontier <- function(n_groups = 2L,
       true_v = v,
       stringsAsFactors = FALSE
     )
+    if (!is.null(selection)) {
+      df_g$z1 <- z1
+      df_g$d <- d
+      df_g$log_y[d == 0] <- NA
+    }
 
     frames[[g]] <- df_g
   }
@@ -294,10 +353,24 @@ simulate_metafrontier <- function(n_groups = 2L,
     sigma_u = setNames(sigma_u, group_names),
     sigma_v = sigma_v,
     n_groups = n_groups,
-    n_per_group = setNames(n_per_group, group_names)
+    n_per_group = setNames(n_per_group, group_names),
+    frontier = frontier,
+    selection = selection,
+    spatial = spatial
   )
 
-  list(data = data, params = params)
+  out <- list(data = data, params = params)
+  if (!is.null(spatial)) {
+    # Block-diagonal weights in data order: no links between groups
+    W <- matrix(0, n_total, n_total)
+    ends <- cumsum(n_per_group)
+    for (g in seq_len(n_groups)) {
+      idx <- (ends[g] - n_per_group[g] + 1L):ends[g]
+      W[idx, idx] <- W_list[[g]]
+    }
+    out$W <- W
+  }
+  out
 }
 
 

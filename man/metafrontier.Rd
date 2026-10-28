@@ -23,6 +23,9 @@ metafrontier(
   objective = c("lp", "qp"),
   engine = c("internal", "sfaR", "frontier", "Benchmarking"),
   slack = FALSE,
+  frontier = c("production", "cost"),
+  selection = NULL,
+  spatial = NULL,
   ...
 )
 }
@@ -143,6 +146,42 @@ and output slacks (with the radial score held fixed) against
 both the group and the pooled reference sets. Default
 \code{FALSE}.}
 
+\item{frontier}{character. \code{"production"} (default), with
+composed error \eqn{\varepsilon = v - u}, or \code{"cost"}, with
+\eqn{\varepsilon = v + u} and a cost metafrontier that lies on or
+below every group cost frontier. Efficiencies and technology gap
+ratios lie in (0, 1] in both cases. SFA methods only.}
+
+\item{selection}{an optional two-sided formula \code{d ~ z1 + z2}
+naming a 0/1 selection indicator and its regressors. Each group
+frontier is then estimated as the sample-selection stochastic
+frontier of Greene (2010): a probit selection equation, and a
+frontier observed when \code{d = 1} whose noise is correlated
+(\code{rho}) with the selection error. Rows with \code{d = 0} enter
+only the probit and may have a missing outcome; efficiencies and
+technology gap ratios are reported for the selected rows.
+Half-normal or exponential inefficiency; cross-sectional SFA with
+the internal engine only.}
+
+\item{spatial}{an optional list \code{list(W = , row_standardise =
+FALSE)}. \code{W} is an n x n spatial weights matrix
+for the rows of \code{data} (a matrix, a \pkg{Matrix} matrix or an
+\pkg{spdep} \code{listw} object) with a zero diagonal. Each group
+frontier is then the spatial-autoregressive stochastic frontier
+\eqn{y = \rho_g W_g y + x'\beta_g + v - u} (Glass, Kenjegalieva and
+Sickles, 2016), where \eqn{W_g} is the block of \code{W} for the
+group's own units (re-row-standardised when \code{row_standardise =
+TRUE}), so spillovers between groups are excluded. Each group model
+reports \code{rho} and the direct, indirect and total input effects
+(\code{effects}). The metafrontier envelops the long-run group
+frontiers \eqn{m_g x'\beta_g}, with \eqn{m_g} the mean row sum of
+\eqn{(I - \rho_g W_g)^{-1}} (\eqn{1 / (1 - \rho_g)} for
+row-standardised weights): with row-standardised weights the
+intercept and \eqn{\rho_g} are nearly collinear, so the direct
+technology \eqn{x'\beta_g} is poorly determined while the long-run
+frontier is not. Cross-sectional SFA without
+inefficiency determinants, internal engine only.}
+
 \item{...}{additional arguments passed to the group-level
 estimation functions.}
 }
@@ -166,7 +205,9 @@ An object of class \code{"metafrontier"} (with subclass
     \item{meta_convergence}{integer convergence code for the
       metafrontier stage (0 = success; \code{\link[stats]{optim}}
       codes for the stochastic metafrontier and the QP barrier
-      fallback; 0 for a successful LP or DEA solution). Each SFA
+      fallback, and 99 for a stochastic metafrontier whose
+      log-likelihood is non-finite or impossibly large; 0 for a
+      successful LP or DEA solution). Each SFA
       group model in \code{group_models} additionally carries its
       own \code{convergence} code. Use
       \code{\link{check_convergence}} to inspect all stages.}
@@ -229,10 +270,13 @@ confidence intervals via \code{\link{boot_tgr}} for corrected
 inference.
 
 \strong{Note on frontier orientation (SFA path):}
-The SFA estimation path assumes a production frontier
-(\eqn{\varepsilon = v - u}). Cost frontiers (\eqn{\varepsilon = v + u})
-are not currently supported via the SFA path. The DEA path supports
-both \code{orientation = "output"} and \code{orientation = "input"}.
+The SFA path estimates production frontiers
+(\eqn{\varepsilon = v - u}) by default and cost frontiers
+(\eqn{\varepsilon = v + u}) with \code{frontier = "cost"}. For cost
+frontiers the deterministic metafrontier envelops the group cost
+frontiers from below, and TGR is the ratio of metatechnology to
+group minimum cost. The DEA path supports both
+\code{orientation = "output"} and \code{orientation = "input"}.
 }
 \examples{
 # Simulate metafrontier data
@@ -268,4 +312,16 @@ O'Donnell, C.J., Rao, D.S.P. and Battese, G.E. (2008).
 Metafrontier frameworks for the study of firm-level efficiencies
 and technology ratios. \emph{Empirical Economics}, 34(2), 231--255.
 \doi{10.1007/s00181-007-0119-4}
+
+Greene, W.H. (2010). A stochastic frontier model with correction for
+sample selection. \emph{Journal of Productivity Analysis}, 34(1),
+15--24. \doi{10.1007/s11123-009-0159-1}
+
+Glass, A.J., Kenjegalieva, K. and Sickles, R.C. (2016). A spatial
+autoregressive stochastic frontier model for panel data with
+asymmetric efficiency spillovers. \emph{Journal of Econometrics},
+190(2), 289--300. \doi{10.1016/j.jeconom.2015.06.011}
+
+LeSage, J. and Pace, R.K. (2009). \emph{Introduction to Spatial
+Econometrics}. CRC Press.
 }

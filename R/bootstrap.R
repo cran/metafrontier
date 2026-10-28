@@ -4,14 +4,47 @@
 #' a fitted metafrontier model. Supports both parametric (residual
 #' resampling) and nonparametric (case resampling) bootstraps.
 #'
-#' @param object a \code{"metafrontier"} object.
+#' The parametric bootstrap keeps the design fixed and redraws the
+#' response, so column \code{i} of \code{tgr_boot} is the TGR of DMU
+#' \code{i} in every replicate. It returns observation-level intervals
+#' (\code{ci}) as well as group-level intervals. Because every replicate
+#' re-estimates the group frontiers before rebuilding the metafrontier,
+#' the intervals carry the first-stage (group frontier) estimation
+#' uncertainty into the TGR, for the deterministic as well as the
+#' stochastic metafrontier.
+#'
+#' The nonparametric bootstrap resamples rows with replacement within
+#' each group, stacks the resampled rows group by group in the order of
+#' \code{groups}, and refits the model. Column \code{j} of
+#' \code{tgr_boot} is then the \code{j}-th resampled unit, a random
+#' draw from group \code{boot_group[j]}, not DMU \code{j}. The
+#' group-level intervals are computed over these position blocks and
+#' do not depend on the row order of the data. No observation-level
+#' intervals are returned (\code{ci} is \code{NULL}): a column is not
+#' tied to any DMU, and evaluating the original DMUs against each
+#' bootstrap frontier instead is, for DEA, the naive bootstrap, which
+#' is inconsistent (Kneip, Simar and Wilson, 2008). For SFA fits,
+#' observation-level intervals are available from the parametric
+#' bootstrap.
+#'
+#' Group-level intervals are percentile intervals of the within-group
+#' mean (\code{ci_group}) and median (\code{ci_group_median}) of the
+#' TGR across replicates. Rows dropped from the fit because of missing
+#' values are left out of both bootstraps.
+#'
+#' @param object a \code{"metafrontier"} object fitted from
+#'   \code{formula}, \code{data} and \code{group}. Metafrontiers built
+#'   from pre-fitted \code{models} are not supported, because the group
+#'   models cannot be re-estimated on bootstrap samples.
 #' @param R integer. Number of bootstrap replications (default 999).
 #' @param type character. \code{"parametric"} resamples from estimated
 #'   error distributions; \code{"nonparametric"} resamples rows within
 #'   groups with replacement.
 #' @param level numeric. Confidence level (default 0.95).
 #' @param ci_type character. \code{"percentile"} (default) or
-#'   \code{"bca"} (bias-corrected and accelerated).
+#'   \code{"bca"} (bias-corrected and accelerated). Applies to the
+#'   observation-level intervals of the parametric bootstrap; the
+#'   group-level intervals are always percentile intervals.
 #' @param seed optional integer seed for reproducibility.
 #' @param progress logical. Show progress bar (default \code{TRUE}).
 #' @param ncores integer. Number of CPU cores for parallel bootstrap
@@ -20,16 +53,32 @@
 #'
 #' @return An object of class \code{"boot_tgr"} containing:
 #'   \describe{
-#'     \item{tgr_boot}{R x n matrix of bootstrapped TGR values}
+#'     \item{tgr_boot}{R x n matrix of bootstrapped TGR values. For the
+#'       parametric bootstrap, column \code{i} is DMU \code{i}; for the
+#'       nonparametric bootstrap, column \code{j} is the \code{j}-th
+#'       resampled unit (see Details).}
 #'     \item{tgr_original}{original TGR estimates}
-#'     \item{ci}{n x 2 matrix of observation-level confidence intervals}
+#'     \item{ci}{n x 2 matrix of observation-level confidence intervals
+#'       (parametric bootstrap), or \code{NULL} (nonparametric
+#'       bootstrap)}
 #'     \item{ci_group}{data frame of group-level mean TGR intervals}
+#'     \item{ci_group_median}{data frame of group-level median TGR
+#'       intervals}
 #'     \item{R_effective}{number of successful replications}
 #'     \item{R}{requested number of replications}
 #'     \item{type}{bootstrap type used}
 #'     \item{ci_type}{CI type used}
 #'     \item{level}{confidence level}
+#'     \item{group_vec}{group of each element of \code{tgr_original}}
+#'     \item{boot_group}{group of each column of \code{tgr_boot}}
+#'     \item{groups}{group labels}
 #'   }
+#'
+#' @references
+#' Kneip, A., Simar, L. and Wilson, P.W. (2008). Asymptotics and
+#' consistent bootstraps for DEA estimators in nonparametric frontier
+#' models. \emph{Econometric Theory}, 24(6), 1663--1697.
+#' \doi{10.1017/S0266466608080651}
 #'
 #' @examples
 #' \donttest{
@@ -41,6 +90,11 @@
 #' boot <- boot_tgr(fit, R = 50, seed = 1)
 #' print(boot)
 #' confint(boot)
+#'
+#' # Nonparametric bootstrap: group-level intervals only
+#' boot_np <- boot_tgr(fit, R = 50, type = "nonparametric", seed = 1)
+#' boot_np$ci_group
+#' boot_np$ci_group_median
 #' }
 #'
 #' @export
@@ -58,6 +112,23 @@ boot_tgr <- function(object, R = 999,
 
   if (!inherits(object, "metafrontier")) {
     stop("'object' must be a fitted metafrontier model.", call. = FALSE)
+  }
+
+  # A metafrontier built from pre-fitted group models keeps only their
+  # model matrices, not the data and estimator that produced them, so
+  # the group models cannot be re-estimated on bootstrap samples
+  if (!is.null(object$call$models)) {
+    stop("boot_tgr() is not available for metafrontiers built from ",
+         "pre-fitted 'models': the group models cannot be re-estimated ",
+         "on bootstrap samples. Fit the metafrontier from 'formula', ",
+         "'data' and 'group' instead.", call. = FALSE)
+  }
+  # Replicates would need to redraw selection as well as the frontier,
+  # and the number of selected rows would vary across replicates; the
+  # resamplers ignore the spatial lag
+  if (!is.null(object$selection) || !is.null(object$spatial)) {
+    stop("boot_tgr() is not available for sample-selection or spatial ",
+         "metafrontiers.", call. = FALSE)
   }
 
   # The parametric bootstrap draws new noise and inefficiency terms
@@ -158,26 +229,50 @@ boot_tgr <- function(object, R = 999,
   # Remove failed rows
   tgr_boot <- tgr_boot[!is.na(tgr_boot[, 1]), , drop = FALSE]
 
-  # Compute CIs
-  alpha <- (1 - level) / 2
-  ci <- .boot_ci(tgr_boot, object$tgr, alpha, ci_type)
+  # Group of each original TGR, and of each column of tgr_boot. The
+  # parametric bootstrap keeps the design, so column i is DMU i. The
+  # nonparametric bootstrap stacks the resampled rows group by group,
+  # so column j is a draw from the j-th position block. Rows dropped by
+  # na.action in an SFA fit have no TGR.
+  tgr_group <- if (!is.null(object$valid_rows)) {
+    object$group_vec[object$valid_rows]
+  } else {
+    object$group_vec
+  }
+  boot_group <- if (type == "nonparametric") {
+    rep(object$groups, times = as.vector(table(tgr_group)))
+  } else {
+    as.character(tgr_group)
+  }
 
-  # Group-level mean TGR CIs
-  ci_group <- .boot_ci_group(tgr_boot, object$tgr,
-                             object$group_vec, object$groups,
-                             alpha, ci_type)
+  # Observation-level CIs are only defined when columns are DMUs
+  alpha <- (1 - level) / 2
+  ci <- if (type == "parametric") {
+    .boot_ci(tgr_boot, object$tgr, alpha, ci_type)
+  } else {
+    NULL
+  }
+
+  # Group-level mean and median TGR CIs
+  ci_group <- .boot_ci_group(tgr_boot, object$tgr, tgr_group, boot_group,
+                             object$groups, alpha, stat = "mean")
+  ci_group_median <- .boot_ci_group(tgr_boot, object$tgr, tgr_group,
+                                    boot_group, object$groups, alpha,
+                                    stat = "median")
 
   out <- list(
     tgr_boot = tgr_boot,
     tgr_original = object$tgr,
     ci = ci,
     ci_group = ci_group,
+    ci_group_median = ci_group_median,
     R_effective = R_effective,
     R = R,
     type = type,
     ci_type = ci_type,
     level = level,
-    group_vec = object$group_vec,
+    group_vec = tgr_group,
+    boot_group = boot_group,
     groups = object$groups
   )
   class(out) <- "boot_tgr"
@@ -188,29 +283,41 @@ boot_tgr <- function(object, R = 999,
 # ---------- Internal: single bootstrap replicate ----------
 
 .boot_one_replicate <- function(object, type, ...) {
-  data <- object$data
   formula <- object$formula
-  group_vec <- object$group_vec
   groups <- object$groups
+
+  # Only rows used in the original fit (an SFA fit drops rows with
+  # missing values) enter the bootstrap, so the data line up with the
+  # group models and every replicate returns one TGR per fitted row
+  rows <- if (!is.null(object$valid_rows)) {
+    object$valid_rows
+  } else {
+    seq_len(nrow(object$data))
+  }
+  data <- object$data[rows, , drop = FALSE]
+  group_vec <- object$group_vec[rows]
 
   if (type == "parametric") {
     # Parametric: keep the design fixed and regenerate the response by
     # drawing new noise (v) and inefficiency (u) terms from the fitted
     # group-specific error distributions
-    boot_data <- .parametric_resample(object)
+    boot_data <- .parametric_resample(object, data, group_vec)
   } else {
     # Nonparametric: case resampling, i.e. resample whole rows with
     # replacement within each group so group sizes are preserved
-    boot_data <- .nonparametric_resample(data, group_vec, groups)
+    boot_rows <- .nonparametric_resample(group_vec, groups)
+    boot_data <- data[boot_rows, , drop = FALSE]
+    rownames(boot_data) <- NULL
+    group_vec <- group_vec[boot_rows]
   }
 
-  # Re-fit the metafrontier using the original group column name
-  group_col <- if (!is.null(object$group_col)) object$group_col else "group"
-
+  # Re-fit the metafrontier with the fitted group labels rather than a
+  # column name: the fit may have been given 'group' as a vector, and
+  # the data may hold an unrelated column called "group"
   boot_fit <- metafrontier(
     formula = formula,
     data = boot_data,
-    group = group_col,
+    group = group_vec,
     method = object$method,
     meta_type = object$meta_type,
     dist = if (object$method == "sfa" &&
@@ -238,6 +345,7 @@ boot_tgr <- function(object, R = 999,
       object$objective
     } else "lp",
     engine = if (!is.null(object$engine)) object$engine else "internal",
+    frontier = if (!is.null(object$frontier)) object$frontier else "production",
     ...
   )
 
@@ -245,9 +353,9 @@ boot_tgr <- function(object, R = 999,
 }
 
 
-.parametric_resample <- function(object) {
-  data <- object$data
-  group_vec <- object$group_vec
+# data and group_vec are restricted to the rows used in the fit, so the
+# response, the group labels and each group's fitted frontier line up
+.parametric_resample <- function(object, data, group_vec) {
   groups <- object$groups
   formula <- object$formula
 
@@ -282,6 +390,7 @@ boot_tgr <- function(object, R = 999,
         # Truncated normal: draw from N(mu, sigma_u^2) truncated at 0
         mu_val <- if (!is.null(gm$mu_vec)) mean(gm$mu_vec)
                   else if ("mu" %in% names(gm$all_params)) gm$all_params["mu"]
+                  else if (!is.null(gm$mu)) gm$mu  # external engines
                   else 0
         # Simple rejection sampling for truncated normal
         raw <- rnorm(n_g * 3, mean = mu_val, sd = sigma_u)
@@ -295,9 +404,11 @@ boot_tgr <- function(object, R = 999,
       abs(rnorm(n_g, mean = 0, sd = sigma_u))  # default fallback
     )
 
-    # Fitted frontier value = X %*% beta
+    # Fitted frontier value = X %*% beta; inefficiency lowers output
+    # and raises cost
     fitted_g <- gm$fitted
-    boot_y[idx] <- fitted_g + v_new - u_new
+    sign_g <- if (is.null(gm$sign)) 1 else gm$sign
+    boot_y[idx] <- fitted_g + v_new - sign_g * u_new
   }
 
   # Replace response in data
@@ -308,16 +419,15 @@ boot_tgr <- function(object, R = 999,
 }
 
 
-.nonparametric_resample <- function(data, group_vec, groups) {
+# Row indices of a case resample, stacked group by group
+.nonparametric_resample <- function(group_vec, groups) {
   boot_rows <- integer(0)
   for (g in groups) {
     idx <- which(group_vec == g)
     boot_idx <- sample(idx, length(idx), replace = TRUE)
     boot_rows <- c(boot_rows, boot_idx)
   }
-  boot_data <- data[boot_rows, , drop = FALSE]
-  rownames(boot_data) <- NULL
-  boot_data
+  boot_rows
 }
 
 
@@ -368,11 +478,17 @@ boot_tgr <- function(object, R = 999,
 }
 
 
-.boot_ci_group <- function(tgr_boot, tgr_orig, group_vec, groups,
-                           alpha, ci_type) {
+# Percentile intervals for a within-group statistic of the TGR.
+# tgr_group labels the original estimates; boot_group labels the
+# columns of tgr_boot (these differ for the nonparametric bootstrap).
+.boot_ci_group <- function(tgr_boot, tgr_orig, tgr_group, boot_group,
+                           groups, alpha, stat = c("mean", "median")) {
+  stat <- match.arg(stat)
+  stat_fun <- match.fun(stat)
+
   result <- data.frame(
     Group = groups,
-    Mean_TGR = NA_real_,
+    Estimate = NA_real_,
     Lower = NA_real_,
     Upper = NA_real_,
     stringsAsFactors = FALSE
@@ -380,21 +496,23 @@ boot_tgr <- function(object, R = 999,
 
   for (j in seq_along(groups)) {
     g <- groups[j]
-    idx <- which(group_vec == g)
-    result$Mean_TGR[j] <- mean(tgr_orig[idx])
+    result$Estimate[j] <- stat_fun(tgr_orig[tgr_group == g])
 
-    # Mean TGR per bootstrap replicate
-    group_means <- apply(tgr_boot[, idx, drop = FALSE], 1, mean)
-    group_means <- group_means[is.finite(group_means)]
+    # Group statistic per bootstrap replicate
+    group_stats <- apply(tgr_boot[, boot_group == g, drop = FALSE], 1,
+                         stat_fun)
+    group_stats <- group_stats[is.finite(group_stats)]
 
-    if (length(group_means) >= 2) {
-      result$Lower[j] <- quantile(group_means, probs = alpha)
-      result$Upper[j] <- quantile(group_means, probs = 1 - alpha)
+    if (length(group_stats) >= 2) {
+      result$Lower[j] <- quantile(group_stats, probs = alpha)
+      result$Upper[j] <- quantile(group_stats, probs = 1 - alpha)
     }
   }
 
-  names(result)[3:4] <- paste0(format(100 * c(alpha, 1 - alpha),
-                                      trim = TRUE, digits = 3), "%")
+  names(result)[2:4] <- c(
+    if (stat == "mean") "Mean_TGR" else "Median_TGR",
+    paste0(format(100 * c(alpha, 1 - alpha), trim = TRUE, digits = 3), "%")
+  )
   result
 }
 
@@ -410,18 +528,28 @@ print.boot_tgr <- function(x, digits = 4, ...) {
   cat("Replications:  ", x$R_effective, "/", x$R, "\n")
   cat("Level:         ", x$level, "\n\n")
 
-  cat("Group-level mean TGR:\n")
-  ci_print <- x$ci_group
-  num_cols <- sapply(ci_print, is.numeric)
-  ci_print[num_cols] <- lapply(ci_print[num_cols], round, digits = digits)
-  print(ci_print, row.names = FALSE)
-  cat("\n")
+  titles <- c(ci_group = "Group-level mean TGR:",
+              ci_group_median = "Group-level median TGR:")
+  for (tab in names(titles)) {
+    cat(titles[[tab]], "\n", sep = "")
+    ci_print <- x[[tab]]
+    num_cols <- sapply(ci_print, is.numeric)
+    ci_print[num_cols] <- lapply(ci_print[num_cols], round, digits = digits)
+    print(ci_print, row.names = FALSE)
+    cat("\n")
+  }
   invisible(x)
 }
 
 
 #' @export
 confint.boot_tgr <- function(object, parm, level, ...) {
+  if (is.null(object$ci)) {
+    stop("Observation-level intervals are not available for the ",
+         "nonparametric bootstrap: each column of 'tgr_boot' is a ",
+         "resampled unit, not a fixed DMU. Use the group-level intervals ",
+         "in '$ci_group' and '$ci_group_median'.", call. = FALSE)
+  }
   if (!missing(level) && level != object$level) {
     warning("Recomputing CI at a different level requires re-running ",
             "boot_tgr(). Returning CI at the original level = ",
@@ -448,11 +576,12 @@ plot.boot_tgr <- function(x, which = c("distribution", "ci"),
     on.exit(graphics::par(old_par))
 
     for (g in groups_plot) {
-      idx <- which(x$group_vec == g)
-      group_means <- apply(x$tgr_boot[, idx, drop = FALSE], 1, mean)
+      group_means <- apply(x$tgr_boot[, x$boot_group == g, drop = FALSE],
+                           1, mean)
       graphics::hist(group_means, main = paste("TGR:", g),
                      xlab = "Mean TGR", col = "lightblue", border = "white")
-      graphics::abline(v = mean(x$tgr_original[idx]), col = "red", lwd = 2)
+      graphics::abline(v = mean(x$tgr_original[x$group_vec == g]),
+                       col = "red", lwd = 2)
       # Dashed lines at the group-level CI bounds (columns 3:4 of
       # ci_group; names are level-dependent, e.g. "2.5%"/"97.5%")
       if (!is.null(x$ci_group)) {

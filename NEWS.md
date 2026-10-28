@@ -1,3 +1,197 @@
+# metafrontier 0.4.0
+
+## New features
+
+- Cost frontiers (#6): `metafrontier(frontier = "cost")` estimates group
+  cost frontiers with composed error v + u and a cost metafrontier that
+  lies on or below every group cost frontier. Cost efficiency, TGR (the
+  ratio of minimum costs) and TE* lie in (0, 1]. Supported for
+  cross-sectional, heteroscedastic and panel (BC92/BC95) group models,
+  deterministic (LP and QP) and stochastic metafrontiers, the `sfaR`
+  (`S = -1`) and `frontier` (`ineffDecrease = FALSE`) engines,
+  `models =` imports (the frontier type is read from the models, and
+  mixing production and cost models is an error), `boot_tgr()`,
+  Murphy-Topel standard errors and `poolability_test()`.
+  `simulate_metafrontier(frontier = "cost")` generates cost data. Cost
+  DEA and cost latent class models are not supported and stop with an
+  error. Production results are unchanged.
+
+- Fare-Primont and Lowe TFP indexes (#10): `tfp_index()` computes
+  multiplicatively complete, transitive TFP levels and indexes (O'Donnell
+  2012), decomposes TFP efficiency (TFPE = OTE x OME x ROSE = OTE x OSE x
+  RME, and the input-oriented analogue) against each group's technology
+  and against the metatechnology, and reports the TFP metatechnology
+  ratio (TFPE_meta = TFPE_group x MTR). Output or input orientation, CRS
+  or VRS, contemporaneous or sequential technologies; `print`, `summary`
+  and `autoplot` methods. Results against the metatechnology match
+  `productivity::fareprim()` and `productivity::lowe()`.
+
+- Sample-selection metafrontier (#7): `metafrontier(selection = d ~ z)`
+  estimates each group frontier as Greene's (2010) sample-selection
+  stochastic frontier (probit first step; second step by Gauss-Hermite
+  quadrature over u, half-normal or exponential), with the noise
+  correlated with the selection error (`rho`). Unselected rows enter only
+  the probit and may have a missing outcome; TE, TGR and TE* are
+  reported for the selected rows. Works with `frontier = "cost"` and both
+  metafrontier types; `summary()` shows the selection equations and
+  `check_convergence()` the probit. `simulate_metafrontier(selection = )`
+  generates selection data. The bootstrap, the Murphy-Topel correction
+  and the poolability test are not available for selection fits and stop
+  with an error. Group estimates match `sfaR::sfaselectioncross()`;
+  efficiencies are checked against direct numerical integration because
+  `sfaR` 1.0.1 misaligns the probit index in
+  `efficiencies.sfaselectioncross()`.
+
+- Spatial SFA metafrontier (#8): `metafrontier(spatial = list(W = ))`
+  estimates each group frontier as a spatial-autoregressive stochastic
+  frontier, y = rho W y + x'beta + v - u (Glass, Kenjegalieva and
+  Sickles, 2016), with W restricted to the group's own units (optionally
+  re-row-standardised), so there are no spillovers between technologies.
+  rho is estimated by profiling the full likelihood (log-Jacobian from
+  the eigenvalues of W); each group model reports `rho`, a Hessian that
+  includes rho, and direct, indirect and total input effects with
+  delta-method standard errors (LeSage and Pace, 2009). The metafrontier
+  envelops the long-run group frontiers x'beta / (1 - rho) (for
+  row-standardised W; in general the mean row sum of (I - rho W)^-1),
+  because with row-standardised W the intercept and rho are nearly
+  collinear and the direct technology x'beta is poorly determined; on
+  simulated data the seed-to-seed spread of the TGR relative to the true
+  gap halves (regression-tested). W may be a matrix, a `Matrix` or an
+  `spdep` `listw`; rows dropped for missing values are dropped from W.
+  Works with `frontier = "cost"` and both metafrontier types.
+  `simulate_metafrontier(spatial = list(rho, k))` generates SAR data with
+  a block-diagonal kNN W. The bootstrap, the Murphy-Topel correction and
+  the poolability test are not available for spatial fits and stop with
+  an error.
+
+## Breaking changes
+
+- `boot_tgr(type = "nonparametric")` no longer returns
+  observation-level intervals: `ci` is `NULL` and `confint()` signals
+  an error. Each replicate refits the model on rows resampled within
+  groups, so column `i` of `tgr_boot` is a random draw from a group,
+  not DMU `i`, and the previous `ci[i, ]` was not specific to DMU `i`
+  whatever the row order. Evaluating the original DMUs against each
+  bootstrap frontier instead would, for DEA, be the naive bootstrap,
+  which is inconsistent (Kneip, Simar and Wilson, 2008). The
+  parametric bootstrap keeps the design fixed and still returns
+  observation-level intervals.
+
+## Bug fixes
+
+- SFA with `dist = "exponential"` could diverge silently. The
+  normal-exponential log-density adds `sigma_v^2 / (2 sigma_u^2)` to
+  `log Phi(-a)`, which is close to `-a^2 / 2` for large `a`. When the
+  optimiser tried large values of `sigma_v / sigma_u`, the two terms
+  cancelled, and their rounding error, which can be positive and
+  astronomically large, replaced the true value. BFGS climbed this
+  error: on the package's test data one group frontier ended at
+  `sigma_v` of about 4e91 and `sigma_u` of about 5e34 with a
+  log-likelihood of 2e100, reported as converged, and the
+  second-stage stochastic metafrontier diverged in the same way even
+  given correct group frontiers. The failure was common: with the
+  default settings of `simulate_metafrontier()`, 75 of 80 group fits
+  (40 seeds, 150 observations per group) diverged. Exponential fits
+  made with earlier versions should be re-estimated;
+  `check_convergence()` flags the affected stages of stored objects
+  (see below). For `a > 40` the log-density is now evaluated in an
+  algebraically equivalent form based on the asymptotic expansion of
+  the Mills ratio, which avoids the cancellation; the affected group
+  fit on the test data now agrees with
+  `sfaR::sfacross()` (regression-tested). Below `a = 40` the
+  evaluation is unchanged, so fits that never reached that region
+  give identical results. The fix covers group frontiers with and
+  without inefficiency determinants, the stochastic metafrontier,
+  latent class models, and Murphy-Topel standard errors.
+
+- An SFA stage whose log-likelihood at the optimiser's solution is not
+  finite, or exceeds `n * (-log(sigma_v) - log(2 * pi) / 2)` (the
+  largest value any model with `N(0, sigma_v^2)` noise can attain), is
+  now reported with convergence code 99 and a warning, rather than
+  with the optimiser's code 0. `check_convergence()`, `summary()` and
+  `print()` show such stages as not converged, with the reason in the
+  `note` column. `check_convergence()` applies the check to the stored
+  fit, so objects created with earlier versions are flagged too.
+
+- Stochastic metafrontier (`meta_type = "stochastic"`): the TGR was
+  computed as `exp(group_frontier - meta_frontier)`, which equals
+  `exp(v* - u*)` and so included the Stage 2 noise; values above 1
+  were common. The TGR is now `E[exp(-u*) | eps*]`, the conditional
+  expectation of Huang, Huang and Liu (2014), and lies in (0, 1].
+  `te_meta` changes accordingly. Stochastic fits from earlier versions
+  should be re-estimated (regression-tested).
+
+- `malmquist_meta(method = "sfa")`: technical change was inverted. The
+  SFA path works with `frontier(x) / y`, the reciprocal of the output
+  distance function, but used the DEA ratios, so a frontier shift up
+  was reported as technical regress (`TC_group`, `TC_meta`, `MPI`,
+  `MPI_group` and `MPI_meta` were all affected). `EC_meta` also used
+  the metafrontier level where the TGR belongs; it now equals
+  `TEC x TGC`. A simulated 22% frontier shift is now recovered
+  (regression-tested). The DEA path was correct and is unchanged.
+
+- Rows with a missing model variable or group label are now dropped
+  once, before estimation, in `metafrontier()`, `malmquist_meta()`
+  (also for a missing period or id) and `latent_class_metafrontier()`.
+  Previously the group fits dropped them but the pooled stage and the
+  stored `group_vec` and `nobs` did not: SFA fits had fewer TGRs than
+  rows, so `summary()` failed and `print()` misreported group means;
+  DEA fits silently recycled group efficiencies onto the wrong rows;
+  rows with a missing group got `te_group = 0` and entered the
+  metafrontier; and latent class fits failed. A fit on data with
+  missing values now equals the fit on the complete rows
+  (regression-tested).
+
+- `boot_tgr(type = "nonparametric")`: group-level intervals mixed
+  bootstrap draws across groups whenever the data were not sorted by
+  group. Each replicate stacks the resampled rows group by group, so
+  column `j` of `tgr_boot` is a draw from the `j`-th position block,
+  but `ci_group`, and the distribution panels of `plot()` and
+  `autoplot()`, selected columns by the groups of the original rows.
+  With unsorted groups of different TGR levels, the intervals were
+  pulled towards the pooled mean and could exclude the group estimate.
+  Group intervals now use the position blocks, stored in the new
+  element `boot_group`, and do not depend on row order
+  (regression-tested). Results for data already sorted by group are
+  unchanged. Nonparametric `boot_tgr` objects created with earlier
+  versions from unsorted data should be recomputed.
+- `boot_tgr()` now bootstraps only the rows used in the fit. For an
+  SFA fit with rows dropped for missing values, the nonparametric
+  bootstrap previously stopped with a replacement-length error, and the
+  parametric bootstrap, with only recycling warnings, simulated each
+  group's response from fitted frontier values shifted out of line with
+  the inputs from the group's first dropped row onwards, giving wrong
+  intervals. Both now match the bootstrap on the complete cases
+  (regression-tested).
+- `boot_tgr()` refitted each replicate by looking up a column named
+  `"group"` in the data whenever the fit was given `group` as a vector.
+  Without such a column every replicate failed; with an unrelated
+  column of that name the replicates were silently regrouped by it. The
+  refits now use the fitted group labels directly, and results match
+  those of the same fit made with a column name (regression-tested).
+- `boot_tgr()` now stops with an informative error for metafrontiers
+  built from pre-fitted `models`, whose group models cannot be
+  re-estimated on bootstrap samples. Every replicate previously failed,
+  leaving only a warning. Fit from `formula`, `data` and `group`
+  instead.
+- `boot_tgr(type = "parametric")` failed in every replicate for fits
+  with `engine = "sfaR"` or `engine = "frontier"`: their group models
+  stored no fitted frontier values, and the error scales `sigma_v` and
+  `sigma_u` of `sfaR` fits were `NA` because every `sfaR` release
+  reports them as log variances (`Zv_(Intercept)`, `Zu_(Intercept)`),
+  not under the names the extractor looked for. External-engine group
+  models now store `fitted`, and `sfaR` fits yield `sigma_v`, `sigma_u`
+  and, for `dist = "tnormal"`, `mu`, matching the internal estimates
+  (regression-tested for `"hnormal"`, `"tnormal"` and `"exponential"`).
+  The corrected scales also apply to `sfacross` objects passed to
+  `metafrontier(models = )` or `as_metafrontier_model()`.
+
+## New features
+
+- `boot_tgr()` returns percentile intervals for the group median TGR
+  (`ci_group_median`) alongside those for the group mean
+  (`ci_group`), and `print()` shows both.
+
 # metafrontier 0.3.1
 
 ## Bug fixes

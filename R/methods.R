@@ -19,6 +19,9 @@ print.metafrontier <- function(x, ...) {
   cat("------------------\n")
   cat("Method:          ", x$method, "\n")
   cat("Metafrontier:    ", x$meta_type, "\n")
+  if (!is.null(x$frontier) && x$method == "sfa") {
+    cat("Frontier:        ", x$frontier, "\n")
+  }
   if (!is.null(x$estimator)) {
     cat("Estimator:       ", x$estimator, "\n")
   }
@@ -210,6 +213,12 @@ summary.metafrontier <- function(object, ...) {
     call = object$call,
     method = object$method,
     meta_type = object$meta_type,
+    frontier = if (object$method == "sfa") object$frontier,
+    selection = if (!is.null(object$selection)) {
+      lapply(object$group_models, function(m) {
+        list(gamma = m$gamma, rho = m$rho, n = m$nobs, n_total = m$n_total)
+      })
+    },
     groups = object$groups,
     nobs = object$nobs,
     group_tables = group_tables,
@@ -232,7 +241,9 @@ print.summary.metafrontier <- function(x, digits = 4, ...) {
   cat("Call:\n")
   print(x$call)
   cat("\nMethod:       ", x$method, "\n")
-  cat("Metafrontier: ", x$meta_type, "\n\n")
+  cat("Metafrontier: ", x$meta_type, "\n")
+  if (!is.null(x$frontier)) cat("Frontier:     ", x$frontier, "\n")
+  cat("\n")
 
   # Group-specific frontiers
   if (length(x$group_tables) > 0) {
@@ -254,6 +265,18 @@ print.summary.metafrontier <- function(x, digits = 4, ...) {
       cat("--- Group: ", g, " (n = ", x$nobs[g], ") ---\n", sep = "")
       cat("  DEA efficiency (nonparametric)\n\n")
     }
+  }
+
+  # Sample-selection equations (Greene, 2010)
+  if (!is.null(x$selection)) {
+    cat("--- Selection equations (probit) ---\n")
+    for (g in names(x$selection)) {
+      s <- x$selection[[g]]
+      cat("Group ", g, ": ", s$n, " of ", s$n_total, " selected, rho = ",
+          format(s$rho, digits = digits), "\n", sep = "")
+      print(round(s$gamma, digits))
+    }
+    cat("\n")
   }
 
   # Metafrontier
@@ -489,6 +512,11 @@ vcov.metafrontier <- function(object,
     if (object$meta_type != "stochastic") {
       stop("Murphy-Topel correction requires a stochastic metafrontier ",
            "(meta_type = 'stochastic').", call. = FALSE)
+    }
+    # The Stage 1 scores use the cross-sectional SFA likelihood
+    if (!is.null(object$selection) || !is.null(object$spatial)) {
+      stop("The Murphy-Topel correction is not available for ",
+           "sample-selection or spatial group frontiers.", call. = FALSE)
     }
     if (!requireNamespace("numDeriv", quietly = TRUE)) {
       stop("Package 'numDeriv' is required for the Murphy-Topel ",

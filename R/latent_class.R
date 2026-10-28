@@ -80,11 +80,21 @@ latent_class_metafrontier <- function(formula, data,
 
   dist <- match.arg(dist)
   meta_type <- match.arg(meta_type)
+  # The EM classifies on production-frontier likelihoods
+  frontier <- list(...)$frontier
+  if (!is.null(frontier) && !identical(frontier, "production")) {
+    stop("latent_class_metafrontier() supports production frontiers only.",
+         call. = FALSE)
+  }
 
   if (!is.null(seed)) set.seed(seed)
 
   f <- Formula::Formula(formula)
   f_base <- formula(f, rhs = 1)
+  # Drop incomplete rows up front so the class labels line up with data
+  data <- data[complete.cases(model.frame(f, data = data,
+                                          na.action = na.pass)), ,
+               drop = FALSE]
   mf <- model.frame(f_base, data = data, na.action = na.omit)
   y <- model.response(mf)
   X <- model.matrix(f_base, data = mf)
